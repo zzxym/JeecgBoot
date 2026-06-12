@@ -46,16 +46,6 @@
                           <a-input class="fix-auto-fill" type="password" :placeholder="t('sys.login.password')" v-model:value="formData.password" />
                         </a-form-item>
                       </div>
-                      <div class="aui-inputClear">
-                        <i class="icon icon-code"></i>
-                        <a-form-item>
-                          <a-input class="fix-auto-fill" type="text" :placeholder="t('sys.login.inputCode')" v-model:value="formData.inputCode" />
-                        </a-form-item>
-                        <div class="aui-code">
-                          <img v-if="randCodeData.requestCodeSuccess" :src="randCodeData.randCodeImage" @click="handleChangeCheckCode" />
-                          <img v-else style="margin-top: 2px; max-width: initial" :src="codeImg" @click="handleChangeCheckCode" />
-                        </div>
-                      </div>
                       <div class="aui-inputClear" v-if="showDepart">
                         <i class="icon icon-depart"></i>
                         <div class="JLoginSelectDept">
@@ -168,15 +158,11 @@
     </div>
     <!-- 第三方登录相关弹框 -->
     <ThirdModal ref="thirdModalRef"></ThirdModal>
-
-    <!-- 图片验证码弹窗 -->
-    <CaptchaModal @register="captchaRegisterModal" @ok="getLoginCode" />
   </div>
 </template>
 <script lang="ts" setup name="login-mini">
-  import { getCaptcha, getCodeInfo } from '/@/api/sys/user';
+  import { getCaptcha } from '/@/api/sys/user';
   import { computed, defineAsyncComponent, onMounted, reactive, ref, toRaw, unref, watch } from 'vue';
-  import codeImg from '/@/assets/images/checkcode.png';
   import { useUserStore } from '/@/store/modules/user';
   import { useMessage } from '/@/hooks/web/useMessage';
   import { useI18n } from '/@/hooks/web/useI18n';
@@ -194,9 +180,7 @@
   import { useAppInject } from "/@/hooks/web/useAppInject";
   import { GithubFilled, WechatFilled, DingtalkCircleFilled } from '@ant-design/icons-vue';
   import '/@/utils/iconfont2';
-  import CaptchaModal from '@/components/jeecg/captcha/CaptchaModal.vue';
-  import { useModal } from "@/components/Modal";
-  import { ExceptionEnum } from "@/enums/exceptionEnum";
+
   import { encryptAESCBC } from '/@/utils/cipher';
   import { defHttp } from "@/utils/http/axios";
   import { IconFont } from '/@/utils/iconfont2';
@@ -208,11 +192,6 @@
   const $ls = createLocalStorage();
   const localeStore = useLocaleStore();
   const showLocale = localeStore.getShowPicker;
-  const randCodeData = reactive<any>({
-    randCodeImage: '',
-    requestCodeSuccess: false,
-    checkKey: null,
-  });
   // 记住用户名
   const rememberMe = ref<boolean>(false);
   const REMEMBER_USERNAME_KEY = 'LOGIN_REMEMBER_USERNAME';
@@ -221,9 +200,8 @@
   const type = ref<string>('login');
   //账号登录表单字段
   const formData = reactive<any>({
-    inputCode: '',
-    username: 'admin',
-    password: '123456',
+    username: '',
+    password: '',
     loginOrgCode: '',
   });
   //手机登录表单字段
@@ -253,7 +231,6 @@
   const registerLoaded = ref<boolean>(false);
   const codeLoginLoaded = ref<boolean>(false);
   const { getIsMobile } = useAppInject();
-  const [captchaRegisterModal, { openModal: openCaptchaModal }] = useModal();
   defineProps({
     sessionTimeout: {
       type: Boolean,
@@ -276,12 +253,11 @@
       return deptName;
     };
   })
-  //监听验证码和输入框的修改
+  //监听短信验证码输入
   watch(
-      () => [formData.inputCode, phoneFormData.smscode],
+      () => phoneFormData.smscode,
       () => {
-        if ((formData.inputCode && formData.inputCode.length == 4)
-            || (phoneFormData.smscode && phoneFormData.smscode.length == 6)) {
+        if (phoneFormData.smscode && phoneFormData.smscode.length == 6) {
             checkAccount()
         }
       },
@@ -295,8 +271,7 @@
         formData.loginOrgCode = null;
         phoneFormData.loginOrgCode = null;
         departList.value = [];
-        if ((formData.inputCode && formData.inputCode.length == 4)
-            || (phoneFormData.smscode && phoneFormData.smscode.length == 6)) {
+        if (phoneFormData.smscode && phoneFormData.smscode.length == 6) {
           checkAccount()
         }
       }
@@ -320,7 +295,6 @@
         let params = {...finalFormData, loginType: activeIndex.value === 'accountLogin' ? 'account' : 'phone'};
         if (loginType == 'account') {
           params['password'] = encryptAESCBC(formData.password);
-          params['checkKey'] = randCodeData.checkKey;
         }
         const res = await defHttp.post({
           url: '/sys/loginGetUserDeparts',
@@ -350,19 +324,6 @@
     },500)
   }
  //**********************查询部门逻辑end*************************************************
-  /**
-   * 获取验证码
-   */
-  function handleChangeCheckCode() {
-    formData.inputCode = '';
-    // 代码逻辑说明: [QQYUN-10775]验证码可以复用 #7674------------
-    randCodeData.checkKey = new Date().getTime() + Math.random().toString(36).slice(-4); // 1629428467008;
-    getCodeInfo(randCodeData.checkKey).then((res) => {
-      randCodeData.randCodeImage = res;
-      randCodeData.requestCodeSuccess = true;
-    });
-  }
-
   /**
    * 切换登录方式
    */
@@ -401,8 +362,6 @@
           password: encryptedPassword,
           username: formData.username,
           loginOrgCode: formData.loginOrgCode,
-          captcha: formData.inputCode,
-          checkKey: randCodeData.checkKey,
           mode: 'none', //不要默认的错误提示
         })
       );
@@ -425,7 +384,6 @@
         description: error.message || t('sys.login.networkExceptionMsg'),
         duration: 3,
       });
-      handleChangeCheckCode();
     } finally {
       loginLoading.value = false;
     }
@@ -478,11 +436,7 @@
       return;
     }
     // 代码逻辑说明: 【issues/8567】严重：修改密码存在水平越权问题：登录应该用登录模板不应该用忘记密码的模板---
-    const result = await getCaptcha({ mobile: phoneFormData.mobile, smsmode: SmsEnum.LOGIN }).catch((res) =>{
-      if(res.code === ExceptionEnum.PHONE_SMS_FAIL_CODE){
-        openCaptchaModal(true, {});
-      }
-    });
+    const result = await getCaptcha({ mobile: phoneFormData.mobile, smsmode: SmsEnum.LOGIN });
     if (result) {
       const TIME_COUNT = 60;
       if (!unref(timer)) {
@@ -537,7 +491,6 @@
     Object.assign(phoneFormData, { mobile: "", smscode: "" });
     type.value = 'login';
     activeIndex.value = 'accountLogin';
-    handleChangeCheckCode();
   }
 
   /**
@@ -563,8 +516,6 @@
   }
 
   onMounted(() => {
-    //加载验证码
-    handleChangeCheckCode();
     // 恢复已记住的用户名
     const saved = $ls.get(REMEMBER_USERNAME_KEY);
     if (saved) {
